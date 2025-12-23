@@ -1,0 +1,557 @@
+import pandas as pd
+import numpy as np
+from datetime import datetime
+
+def calculate_monthly_pc_budget(excel_file):
+    """
+    Calculate monthly PC rental costs with month-by-month breakdown.
+    
+    Expected Excel structure:
+    Columns: PC Model | Unit Price | Jan | Feb | Mar | ... | Dec | Total (optional)
+    
+    - Sheet 1: Current PC Rentals (monthly quantities)
+    - Sheet 2: Returning PCs (monthly return quantities)
+    - Sheet 3: New PCs (monthly new additions)
+    """
+    
+    def create_overall_summary(df_current, df_returning, df_new, month_cols, 
+                              price_col_current, price_col_returning, price_col_new):
+        """Create overall summary: Current - Returning + New, matched by PC Model"""
+        
+        model_col = df_current.columns[0]
+        
+        # Get all unique PC models from all three sheets
+        all_models = set()
+        if len(df_current) > 0:
+            all_models.update(df_current[model_col].dropna().tolist())
+        if len(df_returning) > 0:
+            all_models.update(df_returning[model_col].dropna().tolist())
+        if len(df_new) > 0:
+            all_models.update(df_new[model_col].dropna().tolist())
+        
+        all_models = sorted(list(all_models))
+        
+        # Create result dataframe
+        result_data = {
+            'PC Model': [],
+            'Unit Price': []
+        }
+        
+        for month in month_cols:
+            result_data[str(month)] = []
+        
+        # Process each PC model
+        for model in all_models:
+            # Get data for this model from each sheet
+            current_row = df_current[df_current[model_col] == model]
+            returning_row = df_returning[df_returning[model_col] == model] if len(df_returning) > 0 else pd.DataFrame()
+            new_row = df_new[df_new[model_col] == model] if len(df_new) > 0 else pd.DataFrame()
+            
+            # Get unit price (prefer current, then new, then returning)
+            if len(current_row) > 0:
+                unit_price = current_row.iloc[0][price_col_current]
+            elif len(new_row) > 0:
+                unit_price = new_row.iloc[0][price_col_new]
+            elif len(returning_row) > 0:
+                unit_price = returning_row.iloc[0][price_col_returning]
+            else:
+                unit_price = 0
+            
+            result_data['PC Model'].append(model)
+            result_data['Unit Price'].append(unit_price)
+            
+            # Calculate net cost for each month
+            for month in month_cols:
+                current_cost = 0
+                returning_cost = 0
+                new_cost = 0
+                
+                if len(current_row) > 0 and month in current_row.columns:
+                    current_qty = current_row.iloc[0][month] if pd.notna(current_row.iloc[0][month]) else 0
+                    current_cost = current_qty * unit_price
+                
+                if len(returning_row) > 0 and month in returning_row.columns:
+                    returning_qty = returning_row.iloc[0][month] if pd.notna(returning_row.iloc[0][month]) else 0
+                    returning_cost = returning_qty * unit_price
+                
+                if len(new_row) > 0 and month in new_row.columns:
+                    new_qty = new_row.iloc[0][month] if pd.notna(new_row.iloc[0][month]) else 0
+                    new_cost = new_qty * unit_price
+                
+                net_cost = current_cost - returning_cost + new_cost
+                result_data[str(month)].append(net_cost)
+        
+        # Add TOTAL row
+        result_data['PC Model'].append('TOTAL')
+        result_data['Unit Price'].append('')
+        
+        for month in month_cols:
+            month_total = sum([result_data[str(month)][i] for i in range(len(all_models))])
+            result_data[str(month)].append(month_total)
+        
+        return pd.DataFrame(result_data)
+    
+    def create_monthly_cost_csv(df, month_cols, price_col):
+        """Create a DataFrame for CSV export with monthly costs per PC model"""
+        if len(df) == 0:
+            return pd.DataFrame()
+        
+        # Get PC model column (usually first column)
+        model_col = df.columns[0]
+        
+        # Create result dataframe
+        result_data = {
+            'PC Model': [],
+            'Unit Price': []
+        }
+        
+        # Add month columns
+        for month in month_cols:
+            result_data[str(month)] = []
+        
+        # Add each PC model row
+        for idx, row in df.iterrows():
+            result_data['PC Model'].append(row[model_col])
+            result_data['Unit Price'].append(row[price_col])
+            
+            for month in month_cols:
+                qty = row[month] if month in row else 0
+                monthly_cost = qty * row[price_col]
+                result_data[str(month)].append(monthly_cost)
+        
+        # Add TOTAL row
+        result_data['PC Model'].append('TOTAL')
+        result_data['Unit Price'].append('')
+        
+        for month in month_cols:
+            month_total = (df[month] * df[price_col]).sum()
+            result_data[str(month)].append(month_total)
+        
+        return pd.DataFrame(result_data)
+    
+    def display_summary_table(summary_df, month_cols):
+        """Display the overall summary table"""
+        if len(summary_df) == 0:
+            print("  (No data)")
+            return
+        
+        # Header
+        header = f"{'PC Model':<40} {'Unit Price':>12}"
+        for month in month_cols:
+            header += f" {str(month):>12}"
+        print(header)
+        print("-" * len(header))
+        
+        # Each row
+        for idx, row in summary_df.iterrows():
+            model_name = str(row['PC Model'])[:38]
+            unit_price = row['Unit Price'] if row['Unit Price'] != '' else ''
+            
+            if unit_price != '':
+                line = f"{model_name:<40} {unit_price:>12,.0f}"
+            else:
+                line = f"{model_name:<40} {'':<12}"
+            
+            for month in month_cols:
+                cost = row[str(month)]
+                line += f" {cost:>12,.0f}"
+            
+            print(line)
+    
+    def display_monthly_cost_table(df, month_cols, price_col):
+        """Display a table showing monthly costs per PC model"""
+        if len(df) == 0:
+            print("  (No data)")
+            return
+        
+        # Get PC model column (usually first column)
+        model_col = df.columns[0]
+        
+        # Header
+        header = f"{'PC Model':<40} {'Unit Price':>12}"
+        for month in month_cols:
+            header += f" {str(month):>12}"
+        print(header)
+        print("-" * len(header))
+        
+        # Each row
+        for idx, row in df.iterrows():
+            model_name = str(row[model_col])[:38]
+            unit_price = row[price_col]
+            
+            line = f"{model_name:<40} {unit_price:>12,.0f}"
+            
+            for month in month_cols:
+                qty = row[month] if month in row else 0
+                monthly_cost = qty * unit_price
+                line += f" {monthly_cost:>12,.0f}"
+            
+            print(line)
+        
+        # Totals row
+        total_line = f"{'TOTAL':<40} {'':<12}"
+        for month in month_cols:
+            month_total = (df[month] * df[price_col]).sum()
+            total_line += f" {month_total:>12,.0f}"
+        print("-" * len(header))
+        print(total_line)
+    
+    print(f"\n{'='*80}")
+    print(f"PC MONTHLY BUDGET CALCULATOR - {datetime.now().strftime('%Y-%m-%d')}")
+    print(f"{'='*80}\n")
+    
+    # Read all sheets
+    excel_data = pd.read_excel(excel_file, sheet_name=None)
+    sheet_names = list(excel_data.keys())
+    
+    if len(sheet_names) < 3:
+        print("Error: Excel file must contain at least 3 sheets")
+        return
+    
+    # Get the three tables
+    df_current = excel_data[sheet_names[0]].copy()
+    df_returning = excel_data[sheet_names[1]].copy()
+    df_new = excel_data[sheet_names[2]].copy()
+    
+    # Identify month columns (Jan, Feb, Mar, ... or 1月, 2月, 3月, ...)
+    month_patterns = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+                     '1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月']
+    
+    def get_month_columns(df):
+        """Extract month column names from dataframe"""
+        month_cols = []
+        for col in df.columns:
+            col_str = str(col).strip()
+            if any(month in col_str for month in month_patterns):
+                month_cols.append(col)
+        return month_cols
+    
+    month_cols_current = get_month_columns(df_current)
+    month_cols_returning = get_month_columns(df_returning)
+    month_cols_new = get_month_columns(df_new)
+    
+    if not month_cols_current:
+        print("Error: No month columns found. Expected columns like: Jan, Feb, Mar, etc.")
+        return
+    
+    # Get unit price column
+    def get_price_col(df):
+        for col in df.columns:
+            if 'price' in str(col).lower() or 'unit' in str(col).lower():
+                return col
+        return None
+    
+    price_col_current = get_price_col(df_current)
+    price_col_returning = get_price_col(df_returning)
+    price_col_new = get_price_col(df_new)
+    
+    if not price_col_current:
+        print("Error: No 'Unit Price' column found")
+        return
+    
+    print(f"Found {len(month_cols_current)} month columns: {month_cols_current[:3]}...{month_cols_current[-1]}\n")
+    
+    # Clean data - remove empty rows
+    df_current = df_current[df_current[price_col_current].notna()].reset_index(drop=True)
+    df_returning = df_returning[df_returning[price_col_returning].notna()].reset_index(drop=True) if price_col_returning else pd.DataFrame()
+    df_new = df_new[df_new[price_col_new].notna()].reset_index(drop=True) if price_col_new else pd.DataFrame()
+    
+    # Initialize monthly totals
+    num_months = len(month_cols_current)
+    monthly_costs_current = []
+    monthly_costs_returning = []
+    monthly_costs_new = []
+    monthly_qty_current = []
+    monthly_qty_returning = []
+    monthly_qty_new = []
+    
+    # Calculate monthly costs
+    for month_col in month_cols_current:
+        # Current PCs
+        df_current[month_col] = pd.to_numeric(df_current[month_col], errors='coerce').fillna(0)
+        cost = (df_current[month_col] * df_current[price_col_current]).sum()
+        qty = df_current[month_col].sum()
+        monthly_costs_current.append(cost)
+        monthly_qty_current.append(qty)
+    
+    for month_col in month_cols_returning:
+        # Returning PCs
+        if len(df_returning) > 0:
+            df_returning[month_col] = pd.to_numeric(df_returning[month_col], errors='coerce').fillna(0)
+            cost = (df_returning[month_col] * df_returning[price_col_returning]).sum()
+            qty = df_returning[month_col].sum()
+        else:
+            cost = 0
+            qty = 0
+        monthly_costs_returning.append(cost)
+        monthly_qty_returning.append(qty)
+    
+    for month_col in month_cols_new:
+        # New PCs
+        if len(df_new) > 0:
+            df_new[month_col] = pd.to_numeric(df_new[month_col], errors='coerce').fillna(0)
+            cost = (df_new[month_col] * df_new[price_col_new]).sum()
+            qty = df_new[month_col].sum()
+        else:
+            cost = 0
+            qty = 0
+        monthly_costs_new.append(cost)
+        monthly_qty_new.append(qty)
+    
+    # Display summary
+    print(f"{'='*80}")
+    print(f"SHEET SUMMARY")
+    print(f"{'='*80}")
+    print(f"Sheet 1 - Current Rentals: {len(df_current)} PC models")
+    print(f"Sheet 2 - Returning PCs:   {len(df_returning)} PC models")
+    print(f"Sheet 3 - New PCs:         {len(df_new)} PC models")
+    
+    # Create CSV exports
+    csv_current = create_monthly_cost_csv(df_current, month_cols_current, price_col_current)
+    csv_returning = create_monthly_cost_csv(df_returning, month_cols_returning, price_col_returning) if price_col_returning else pd.DataFrame()
+    csv_new = create_monthly_cost_csv(df_new, month_cols_new, price_col_new) if price_col_new else pd.DataFrame()
+    
+    # Create overall summary by matching PC models
+    csv_summary = create_overall_summary(df_current, df_returning, df_new, 
+                                         month_cols_current, price_col_current, 
+                                         price_col_returning, price_col_new)
+    
+    # Save to CSV files
+    csv_summary.to_csv('0_Overall_Summary_Net.csv', index=False, encoding='utf-8-sig')
+    csv_current.to_csv('1_Current_Rentals_Monthly.csv', index=False, encoding='utf-8-sig')
+    if len(csv_returning) > 0:
+        csv_returning.to_csv('2_Returning_PCs_Monthly.csv', index=False, encoding='utf-8-sig')
+    if len(csv_new) > 0:
+        csv_new.to_csv('3_New_PCs_Monthly.csv', index=False, encoding='utf-8-sig')
+    
+    print(f"\n✓ CSV files created:")
+    print(f"  - 0_Overall_Summary_Net.csv (Current - Returning + New by PC Model)")
+    print(f"  - 1_Current_Rentals_Monthly.csv")
+    if len(csv_returning) > 0:
+        print(f"  - 2_Returning_PCs_Monthly.csv")
+    if len(csv_new) > 0:
+        print(f"  - 3_New_PCs_Monthly.csv")
+    
+    # Display overall summary table
+    print(f"\n{'='*80}")
+    print(f"OVERALL SUMMARY: NET MONTHLY COSTS BY PC MODEL")
+    print(f"(Current - Returning + New)")
+    print(f"{'='*80}")
+    display_summary_table(csv_summary, month_cols_current)
+    
+    # ice_col_returning = get_price_col(df_returning)
+    price_col_new = get_price_col(df_new)
+    
+    if not price_col_current:
+        print("Error: No 'Unit Price' column found")
+        return
+    
+    print(f"Found {len(month_cols_current)} month columns: {month_cols_current[:3]}...{month_cols_current[-1]}\n")
+    
+    # Clean data - remove empty rows
+    df_current = df_current[df_current[price_col_current].notna()].reset_index(drop=True)
+    df_returning = df_returning[df_returning[price_col_returning].notna()].reset_index(drop=True)
+    df_new = df_new[df_new[price_col_new].notna()].reset_index(drop=True)
+    
+    # Initialize monthly totals
+    num_months = len(month_cols_current)
+    monthly_costs_current = []
+    monthly_costs_returning = []
+    monthly_costs_new = []
+    monthly_qty_current = []
+    monthly_qty_returning = []
+    monthly_qty_new = []
+    
+    # Calculate monthly costs
+    for month_col in month_cols_current:
+        # Current PCs
+        df_current[month_col] = pd.to_numeric(df_current[month_col], errors='coerce').fillna(0)
+        cost = (df_current[month_col] * df_current[price_col_current]).sum()
+        qty = df_current[month_col].sum()
+        monthly_costs_current.append(cost)
+        monthly_qty_current.append(qty)
+    
+    for month_col in month_cols_returning:
+        # Returning PCs
+        df_returning[month_col] = pd.to_numeric(df_returning[month_col], errors='coerce').fillna(0)
+        cost = (df_returning[month_col] * df_returning[price_col_returning]).sum()
+        qty = df_returning[month_col].sum()
+        monthly_costs_returning.append(cost)
+        monthly_qty_returning.append(qty)
+    
+    for month_col in month_cols_new:
+        # New PCs
+        df_new[month_col] = pd.to_numeric(df_new[month_col], errors='coerce').fillna(0)
+        cost = (df_new[month_col] * df_new[price_col_new]).sum()
+        qty = df_new[month_col].sum()
+        monthly_costs_new.append(cost)
+        monthly_qty_new.append(qty)
+    
+    print(f"\n{'='*80}")
+    print(f"SHEET SUMMARY")
+    print(f"{'='*80}")
+    print(f"Sheet 1 - Current Rentals: {len(df_current)} PC models")
+    print(f"Sheet 2 - Returning PCs:   {len(df_returning)} PC models")
+    print(f"Sheet 3 - New PCs:         {len(df_new)} PC models")
+    
+    # Create CSV exports
+    csv_current = create_monthly_cost_csv(df_current, month_cols_current, price_col_current)
+    csv_returning = create_monthly_cost_csv(df_returning, month_cols_returning, price_col_returning)
+    csv_new = create_monthly_cost_csv(df_new, month_cols_new, price_col_new)
+    
+    # Create overall summary by matching PC models
+    csv_summary = create_overall_summary(df_current, df_returning, df_new, 
+                                         month_cols_current, price_col_current, 
+                                         price_col_returning, price_col_new)
+    
+    # Save to CSV files
+    csv_summary.to_csv('0_Overall_Summary_Net.csv', index=False, encoding='utf-8-sig')
+    csv_current.to_csv('1_Current_Rentals_Monthly.csv', index=False, encoding='utf-8-sig')
+    csv_returning.to_csv('2_Returning_PCs_Monthly.csv', index=False, encoding='utf-8-sig')
+    csv_new.to_csv('3_New_PCs_Monthly.csv', index=False, encoding='utf-8-sig')
+    
+    print(f"\n✓ CSV files created:")
+    print(f"  - 0_Overall_Summary_Net.csv (Current - Returning + New by PC Model)")
+    print(f"  - 1_Current_Rentals_Monthly.csv")
+    print(f"  - 2_Returning_PCs_Monthly.csv")
+    print(f"  - 3_New_PCs_Monthly.csv")
+    
+    # Create detailed monthly cost tables
+    print(f"\n{'='*80}")
+    print(f"TABLE 1: CURRENT PC RENTALS - MONTHLY COSTS")
+    print(f"{'='*80}")
+    display_monthly_cost_table(df_current, month_cols_current, price_col_current)
+    
+    print(f"\n{'='*80}")
+    print(f"TABLE 2: RETURNING PCs - MONTHLY COSTS")
+    print(f"{'='*80}")
+    display_monthly_cost_table(df_returning, month_cols_returning, price_col_returning)
+    
+    print(f"\n{'='*80}")
+    print(f"TABLE 3: NEW PCs - MONTHLY COSTS")
+    print(f"{'='*80}")
+    display_monthly_cost_table(df_new, month_cols_new, price_col_new)
+    
+    # Monthly breakdown
+    print(f"\n{'='*80}")
+    print(f"MONTHLY BREAKDOWN")
+    print(f"{'='*80}")
+    print(f"{'Month':<10} {'Current':<12} {'Returning':<12} {'New PCs':<12} {'Net Cost':<15} {'Net Qty':<10}")
+    print(f"{'-'*80}")
+    
+    net_monthly_costs = []
+    net_monthly_qty = []
+    
+    for i, month in enumerate(month_cols_current):
+        current_cost = monthly_costs_current[i]
+        returning_cost = monthly_costs_returning[i] if i < len(monthly_costs_returning) else 0
+        new_cost = monthly_costs_new[i] if i < len(monthly_costs_new) else 0
+        
+        current_qty = monthly_qty_current[i]
+        returning_qty = monthly_qty_returning[i] if i < len(monthly_qty_returning) else 0
+        new_qty = monthly_qty_new[i] if i < len(monthly_qty_new) else 0
+        
+        net_cost = current_cost - returning_cost + new_cost
+        net_qty = current_qty - returning_qty + new_qty
+        
+        net_monthly_costs.append(net_cost)
+        net_monthly_qty.append(net_qty)
+        
+        print(f"{str(month):<10} ${current_cost:>10,.0f} -${returning_cost:>10,.0f} +${new_cost:>10,.0f} = ${net_cost:>12,.0f}  {int(net_qty):>6} PCs")
+    
+    # Annual summary
+    print(f"{'='*80}")
+    print(f"ANNUAL SUMMARY")
+    print(f"{'='*80}")
+    
+    total_current = sum(monthly_costs_current)
+    total_returning = sum(monthly_costs_returning)
+    total_new = sum(monthly_costs_new)
+    total_net = sum(net_monthly_costs)
+    
+    avg_monthly_cost = total_net / len(net_monthly_costs) if net_monthly_costs else 0
+    avg_monthly_qty = sum(net_monthly_qty) / len(net_monthly_qty) if net_monthly_qty else 0
+    
+    print(f"Total Current PC Costs:     ${total_current:>15,.2f}")
+    print(f"Total Returning PC Savings: ${total_returning:>15,.2f}")
+    print(f"Total New PC Costs:         ${total_new:>15,.2f}")
+    print(f"{'-'*80}")
+    print(f"TOTAL ANNUAL COST:          ${total_net:>15,.2f}")
+    print(f"Average Monthly Cost:       ${avg_monthly_cost:>15,.2f}")
+    print(f"Average Monthly PCs:        {avg_monthly_qty:>15,.0f}")
+    print(f"{'='*80}")
+    
+    # Export summary to CSV
+    summary_data = {
+        'Month': month_cols_current,
+        'Current Rentals Cost': monthly_costs_current,
+        'Returning PCs Cost': monthly_costs_returning[:len(month_cols_current)],
+        'New PCs Cost': monthly_costs_new[:len(month_cols_current)],
+        'Net Monthly Cost': net_monthly_costs,
+        'Net PC Quantity': net_monthly_qty
+    }
+    summary_df = pd.DataFrame(summary_data)
+    summary_df.to_csv('0_Monthly_Summary.csv', index=False, encoding='utf-8-sig')
+    print(f"\n✓ Summary CSV created: 0_Monthly_Summary.csv")
+    
+    # Cost change analysis
+    if len(net_monthly_costs) >= 2:
+        first_month_cost = net_monthly_costs[0]
+        last_month_cost = net_monthly_costs[-1]
+        cost_change = last_month_cost - first_month_cost
+        change_pct = (cost_change / first_month_cost * 100) if first_month_cost > 0 else 0
+        
+        print(f"\nCost Trend (First vs Last Month):")
+        print(f"  First month: ${first_month_cost:,.2f}")
+        print(f"  Last month:  ${last_month_cost:,.2f}")
+        print(f"  Change:      ${cost_change:+,.2f} ({change_pct:+.1f}%)")
+    
+    return {
+        'monthly_costs': net_monthly_costs,
+        'monthly_quantities': net_monthly_qty,
+        'total_annual': total_net,
+        'average_monthly': avg_monthly_cost
+    }
+
+
+if __name__ == "__main__":
+    import os
+    import sys
+    
+    # Check if file specified as argument
+    if len(sys.argv) > 1:
+        excel_file = sys.argv[1]
+        if not os.path.exists(excel_file):
+            print(f"Error: File '{excel_file}' not found")
+            sys.exit(1)
+    else:
+        # Find Excel files, prioritize template files
+        excel_files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls')) and not f.startswith('~')]
+        
+        if not excel_files:
+            print("No Excel files found in current directory.")
+            print("\nUsage: python pc_budget_calculator_monthly.py [filename.xlsx]")
+            print("\nCreate template first: python create_monthly_template.py")
+            sys.exit(1)
+        
+        # Prefer template files
+        template_files = [f for f in excel_files if 'template' in f.lower() or 'monthly' in f.lower()]
+        
+        print(f"Found Excel files: {excel_files}\n")
+        
+        if template_files:
+            excel_file = template_files[0]
+            print(f"Using template file: {excel_file}\n")
+        else:
+            excel_file = excel_files[0]
+            print(f"Processing: {excel_file}\n")
+        
+        try:
+            result = calculate_monthly_pc_budget(excel_file)
+            print("\n✓ Calculation complete!")
+            
+        except Exception as e:
+            print(f"\nError: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
