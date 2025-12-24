@@ -171,40 +171,51 @@ def calculate_by_month(excel_file):
 
 
 if __name__ == "__main__":
+    import sys
+    
     # Default configuration
     DEFAULT_COST_PER_PC = 50  # Adjust this default value as needed
     
-    # Check for Excel files in current directory
-    excel_files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls'))]
-    
-    if not excel_files:
-        print("No Excel files found in current directory.")
-        print("\nUsage: python pc_budget_calculator.py")
-        print("Place your Excel file in the same directory with 3 sheets:")
-        print("  Sheet 1: Current PC rentals")
-        print("  Sheet 2: Returning PCs")
-        print("  Sheet 3: New PCs")
-    else:
-        print(f"Found Excel files: {excel_files}\n")
-        
-        # Use first Excel file or prompt user
-        excel_file = excel_files[0]
+    # Check if file specified via command line
+    if len(sys.argv) > 1:
+        excel_file = sys.argv[1]
+        if not os.path.exists(excel_file):
+            print(f"Error: File '{excel_file}' not found.")
+            sys.exit(1)
         print(f"Processing: {excel_file}\n")
+    else:
+        # Check for Excel files in current directory
+        excel_files = [f for f in os.listdir('.') if f.endswith(('.xlsx', '.xls'))]
         
-        try:
-            result = calculate_monthly_pc_budget(excel_file, DEFAULT_COST_PER_PC)
+        if not excel_files:
+            print("No Excel files found in current directory.")
+            print("\nUsage: python pc_budget_calculator.py [filename.xlsx]")
+            print("Place your Excel file in the same directory with 3 sheets:")
+            print("  Sheet 1: Current PC rentals")
+            print("  Sheet 2: Returning PCs")
+            print("  Sheet 3: New PCs")
+            sys.exit(1)
+        else:
+            print(f"Found Excel files: {excel_files}\n")
             
-            # Optional: Calculate monthly breakdown if dates available
-            # calculate_by_month(excel_file)
-            
-            print("\n" + "="*60)
-            print("Calculation complete!")
-            print("="*60)
-            
-        except Exception as e:
-            print(f"\nError processing file: {e}")
-            print("\nPlease ensure your Excel file has the correct structure:")
-            print("  - Sheet 1: Current PC rentals")
-            print("  - Sheet 2: Returning PCs")
-            print("  - Sheet 3: New PCs")
-            print("\nColumns should include quantity/count and cost/price information.")
+            # Use first Excel file
+            excel_file = excel_files[0]
+            print(f"Processing: {excel_file}\n")
+    
+    try:
+        result = calculate_monthly_pc_budget(excel_file, DEFAULT_COST_PER_PC)
+        
+        # Optional: Calculate monthly breakdown if dates available
+        # calculate_by_month(excel_file)
+        
+        print("\n" + "="*60)
+        print("Calculation complete!")
+        print("="*60)
+        
+    except Exception as e:
+        print(f"\nError processing file: {e}")
+        print("\nPlease ensure your Excel file has the correct structure:")
+        print("  - Sheet 1: Current PC rentals")
+        print("  - Sheet 2: Returning PCs")
+        print("  - Sheet 3: New PCs")
+        print("\nColumns should include quantity/count and cost/price information.")
